@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "redhat.ansible",
+    "ms-python.black-formatter",
+    "ms-python.python",
+    "ms-azuretools.vscode-docker",
+    "coolbear.systemd-unit-file",
+    "timonwong.shellcheck",
+    "foxundermoon.shell-format",
+    "redhat.vscode-yaml"
+  ]
+}

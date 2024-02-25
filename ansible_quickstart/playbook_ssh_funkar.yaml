@@ -1,0 +1,149 @@
+---
+- name: Dennis final Project
+  hosts: all
+  become: yes
+  gather_facts: true
+
+  vars: 
+    # Variabler för nycklar och nya användare
+    ssh_key_path: ssh-keygen/id_ed25519.pub # Pushar publik ssh-nyckel till authorized_keys på server
+    user_name: sync2 # Ny användare
+
+  tasks:
+
+
+
+#### Uppdatera & uppgradera noderna ####
+
+  - name: Update package cache
+    ansible.builtin.package:
+      name: '*'
+      state: latest
+      update_cache: yes
+
+  # - name: Upgrade all packages
+  #   ansible.builtin.package:
+  #     name: '*'
+  #     state: latest
+
+
+#### Skapa användare ####
+
+  - name: Skapa användaren Sync2
+    ansible.builtin.user:
+      name: "{{ user_name }}"
+      password: "$6$qMzqaIcBJiaxENN7$JXa9kilbpmQ/xHIE0HyBBfWM20ib36xHGk4qTNvzanISmbrWsVEmjFeBRmmCAHNtF3QUYxIcHPF2NgJyD3VgY." # Fått reda på att det inte är best practise att lägga in hashen i playbooken, men vill inte ädra något nu
+      create_home: true
+      home: /home/{{ user_name }}
+      shell: /bin/bash
+
+
+#### Privata och publika nycklar ####
+
+  - name: Publik nyckel till noder
+    authorized_key:
+      user: "{{ user_name }}"
+      key: "{{ lookup('file', ssh_key_path) }}"
+
+  - name: Avkryptera
+    ansible.builtin.copy:
+      src: ssh-keygen/ssh_vault_key.yml
+      dest: "/home/sync2/.ssh/id_ed25519"
+      owner: "{{ user_name }}"
+
+  - name: Sätt rättigheter på filen
+    ansible.builtin.file:
+      path: "/home/sync2/.ssh/id_ed25519"
+      owner: sync2
+      mode: '0400'
+
+
+#### Härdning och säkerhet ####
+
+  - name: Ändrar inställning i sshd_config
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^PasswordAuthentication'
+      line: 'PasswordAuthentication no'
+
+  - name: Starta om ssh-tjänsten
+    service:
+      name: ssh
+      state: restarted  
+
+
+#### Scanna och skriv publika nycklar till known_hosts ####
+
+  - name: Create variable from the output of ssh-keyscan
+    ansible.builtin.command:
+      cmd: "ssh-keyscan -H {{ ansible_default_ipv4.address }} }}"
+    changed_when: false
+    register: keyscan_output
+
+  - name: Publish the output of ssh-keyscan to all other hosts
+    ansible.builtin.set_fact:
+      known_hosts_lines: "{{ keyscan_output.stdout_lines }}"
+
+  - name: Add known_hosts lines to all other hosts
+    ansible.builtin.lineinfile:
+      path: /home/sync2/.ssh/known_hosts
+      search_string: "{{ item | regex_search('\\S+ \\S+$') }}"
+      owner: sync2
+      group: sync2
+      mode: "0600"
+      line: "{{ item }}"
+      create: true
+    loop: "{{ ansible_play_hosts | difference([inventory_hostname]) | map('extract', hostvars) | map(attribute='known_hosts_lines') | flatten }}"
+
+
+#### Installera Unison på alla hostar ####
+
+  - name: Install Unison
+    apt:
+      name: unison
+      state: present
+
+  - name: Skapa .unison mapp 
+    ansible.builtin.file:
+      path: "/home/sync2/.unison"
+      state: directory
+      owner: "{{ user_name }}"
+      group: "{{ user_name }}"
+      mode: '0755'
+
+  # - name: Kopiera default.prf 
+  #   copy:
+  #     src: "unison_script/default.prf"
+  #     dest: "/home/sync2/.unison/default.prf"  -----> Skapas automatiskt märkte jag sen
+
+  - name: Skapa /boxydrop-mappen
+    ansible.builtin.file:
+      path: "/boxydrop"
+      state: directory
+      owner: "{{ user_name }}"
+      group: "{{ user_name }}"
+      mode: '0755'
+
+
+#### Konfigurera cronjob [Endast aktiva servrar] ####
+
+- name: Kör cron på aktiva noder   
+  hosts: active_nodes
+  become: true
+  tasks:
+
+    - cron:
+        name: "Lägg till sync-kommandot i crontab"
+        user: sync2
+        minute: "*"
+        job: "unison /boxydrop/ ssh://{{ groups['passive_nodes'][0] }}//boxydrop/"
+        # job: "unison /boxydrop/ ssh://{{ groups['passive_nodes'][0] }}//boxydrop/ -batch -auto" <<-- fungerar med men har desas i en default profile-fil
+
+
+- name: Reboot 
+  hosts: all
+  become: true
+  tasks:
+
+    - name: Unconditionally reboot the machine with all defaults
+      ansible.builtin.reboot:

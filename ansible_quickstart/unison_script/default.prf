@@ -1,0 +1,3 @@
+# unison profile for syncing directories
+auto = true
+batch = true

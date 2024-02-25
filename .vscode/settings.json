@@ -1,0 +1,8 @@
+{
+  "editor.formatOnSave": true,
+  "editor.minimap.enabled": false,
+  "files.autoSave": "afterDelay",
+  "git.autofetch": true,
+  "ansible.validation.enabled": true,
+  "ansible.validation.lint.enabled": true
+}
